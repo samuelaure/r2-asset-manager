@@ -42,12 +42,45 @@ R2_BUCKET_NAME=your_bucket
 
 ## ⌨️ Usage
 
-### Sync Assets
+First, ensure dependencies are installed:
 ```bash
-node butler.js sync --project astrologia_familiar --dir ./videos/raw
+cmd /c npm install
+```
+
+### Sync Assets
+The Butler can be run with direct arguments or interactively.
+```bash
+# Using arguments
+node butler.js sync --project astrologia_familiar --dir C:/videos/new_batch
+
+# Interactive mode (will prompt for missing values)
+node butler.js sync
 ```
 
 ### Rotate Assets (Manual)
+Remove old assets from R2 for a specific project.
 ```bash
-node butler.js rotate --project astrologia_familiar --older-than 90d
+# Delete assets older than 90 days
+node butler.js rotate --project astrologia_familiar --older-than 90
+
+# Preview deletions without touching R2
+node butler.js rotate --project astrologia_familiar --older-than 30 --dry-run
+```
+
+## 📋 Manifest Structure
+The `manifest.json` automatically tracks your assets:
+```json
+{
+  "projects": {
+    "astrologia_familiar": [
+      {
+        "filename": "star_bg_01.mp4",
+        "hash": "a1b2c3d4...",
+        "r2_key": "astrologia_familiar/backgrounds/star_bg_01.mp4",
+        "uploaded_at": "2024-01-18T12:00:00Z",
+        "status": "active"
+      }
+    ]
+  }
+}
 ```
