@@ -5,7 +5,7 @@ import inquirer from 'inquirer';
 import path from 'fs';
 import fsPromises from 'fs/promises';
 import { validateConfig } from './src/config.js';
-import { getManifest, addAsset, findAssetByHash } from './src/manifest.js';
+import { getManifest, addAsset, findAssetByHash, getProjectConfig, setProjectConfig } from './src/manifest.js';
 import { getFileHash } from './src/utils.js';
 import { compressVideo } from './src/ffmpeg.js';
 import { uploadToR2, deleteR2Object } from './src/sync.js';
@@ -17,7 +17,7 @@ const program = new Command();
 program
     .name('butler')
     .description('R2 Media Butler - Process and Sync video assets')
-    .version('0.1.0');
+    .version('0.1.1');
 
 program
     .command('sync')
@@ -56,6 +56,45 @@ program
                 dir = answers.dir;
             }
 
+            const db = await getManifest();
+
+            // --- Project Naming Setup ---
+            let projectConfig = await getProjectConfig(db, project);
+            if (!projectConfig) {
+                console.log(`\nNew project detected: ${project}`);
+
+                // Suggest 3 options for shortCode
+                const suggestions = [
+                    project.substring(0, 2).toUpperCase(),
+                    project.substring(0, 3).toUpperCase(),
+                    project.split('_').map(word => word[0]).join('').toUpperCase().substring(0, 3)
+                ].filter((v, i, a) => a.indexOf(v) === i); // unique
+
+                const setupAnswers = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'shortCodeOption',
+                        message: 'Choose a short-code for this project or enter a custom one:',
+                        choices: [...suggestions, 'Custom']
+                    },
+                    {
+                        type: 'input',
+                        name: 'customShortCode',
+                        message: 'Enter custom short-code (max 4 chars):',
+                        when: (answers) => answers.shortCodeOption === 'Custom',
+                        validate: (input) => (input.length > 0 && input.length <= 4) || 'Short-code must be 1-4 characters'
+                    }
+                ]);
+
+                const shortCode = setupAnswers.shortCodeOption === 'Custom'
+                    ? setupAnswers.customShortCode
+                    : setupAnswers.shortCodeOption;
+
+                await setProjectConfig(db, project, { shortCode, counter: 0 });
+                projectConfig = await getProjectConfig(db, project);
+                console.log(`Project initialized with short-code: ${shortCode}\n`);
+            }
+
             const absoluteDir = pathModule.resolve(dir);
             const files = await fsPromises.readdir(absoluteDir);
             const videoFiles = files.filter(f => /\.(mp4|mov|avi|mkv)$/i.test(f));
@@ -66,8 +105,6 @@ program
             }
 
             console.log(`Found ${videoFiles.length} videos. Starting Butler service for project: ${project}`);
-
-            const db = await getManifest();
 
             for (const fileName of videoFiles) {
                 const filePath = pathModule.join(absoluteDir, fileName);
@@ -80,40 +117,45 @@ program
                 // 2. Deduplication
                 const existing = findAssetByHash(db, project, hash);
                 if (existing) {
-                    console.log(`Skipping: File already exists in project '${project}' as ${existing.filename}`);
+                    console.log(`Skipping: File already exists in project '${project}' as ${existing.system_filename} (Original: ${existing.original_filename})`);
                     continue;
                 }
 
-                // 3. Compress
-                const tempPath = pathModule.join(os.tmpdir(), `butler_${hash}_${fileName}`);
-                console.log('Compressing video...');
+                // 3. Increment Name Generation
+                const nextCounter = projectConfig.counter + 1;
+                const paddedCounter = String(nextCounter).padStart(4, '0');
+                const extension = pathModule.extname(fileName);
+                const systemFileName = `${projectConfig.shortCode}_VID_${paddedCounter}${extension}`;
+
+                // 4. Compress
+                const tempPath = pathModule.join(os.tmpdir(), `butler_${hash}_${systemFileName}`);
+                console.log(`Compressing video to standardized name: ${systemFileName}...`);
                 await compressVideo(filePath, tempPath);
 
-                // 4. Upload
-                const r2Key = `${project}/backgrounds/${fileName}`;
+                // 5. Upload
+                const r2Key = `${project}/backgrounds/${systemFileName}`;
                 console.log(`Uploading to R2: ${r2Key}...`);
                 const etag = await uploadToR2(tempPath, r2Key);
 
-                // 5. Verify & Clean
-                // Note: For R2, ETag is the MD5 of the file (for single-part) 
-                // but since we verified via upload result, and we have local hash, 
-                // we can proceed if no errors.
-                console.log('Verification successful.');
-
-                // Record in manifest
+                // 6. Record in manifest
+                console.log('Recording in manifest...');
                 await addAsset(db, project, {
-                    filename: fileName,
+                    system_filename: systemFileName,
+                    original_filename: fileName,
                     hash: hash,
                     r2_key: r2Key,
                     size: (await fsPromises.stat(tempPath)).size
                 });
 
-                // Cleanup
+                // Update local config ref since addAsset increments it in DB
+                projectConfig = await getProjectConfig(db, project);
+
+                // 7. Cleanup
                 console.log('Cleaning up local files...');
                 await fsPromises.unlink(tempPath); // remove temp
                 await fsPromises.unlink(filePath); // remove original (Verified Sync)
 
-                console.log(`Finished: ${fileName}`);
+                console.log(`Finished: ${systemFileName}`);
             }
 
             console.log('\nAll assets processed successfully.');
@@ -162,7 +204,7 @@ program
                 const uploadDate = new Date(asset.uploaded_at);
 
                 if (asset.status === 'active' && uploadDate < cutoffDate) {
-                    console.log(`[Target] ${asset.filename} (Uploaded: ${asset.uploaded_at})`);
+                    console.log(`[Target] ${asset.system_filename} (Original: ${asset.original_filename}, Uploaded: ${asset.uploaded_at})`);
 
                     if (!dryRun) {
                         try {
@@ -172,7 +214,7 @@ program
                             asset.deleted_at = new Date().toISOString();
                             count++;
                         } catch (err) {
-                            console.error(`Failed to delete ${asset.filename}: ${err.message}`);
+                            console.error(`Failed to delete ${asset.system_filename}: ${err.message}`);
                         }
                     } else {
                         count++;
