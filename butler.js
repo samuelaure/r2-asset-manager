@@ -8,7 +8,7 @@ import { validateConfig } from './src/config.js';
 import { getManifest, addAsset, findAssetByHash } from './src/manifest.js';
 import { getFileHash } from './src/utils.js';
 import { compressVideo } from './src/ffmpeg.js';
-import { uploadToR2 } from './src/sync.js';
+import { uploadToR2, deleteR2Object } from './src/sync.js';
 import pathModule from 'path';
 import os from 'os';
 
@@ -117,6 +117,79 @@ program
             }
 
             console.log('\nAll assets processed successfully.');
+
+        } catch (error) {
+            console.error('Fatal Error:', error.message);
+            process.exit(1);
+        }
+    });
+
+
+program
+    .command('rotate')
+    .description('Rotate old assets from R2 for a specific project')
+    .requiredOption('-p, --project <name>', 'Project/Namespace name')
+    .option('--older-than <days>', 'Delete assets older than X days', '90')
+    .option('--dry-run', 'List assets that would be deleted without deleting them', false)
+    .action(async (options) => {
+        try {
+            validateConfig();
+            const { project, olderThan, dryRun } = options;
+            const days = parseInt(olderThan);
+
+            if (isNaN(days)) {
+                throw new Error('older-than must be a number (days)');
+            }
+
+            const db = await getManifest();
+            const projectAssets = db.data.projects[project];
+
+            if (!projectAssets || projectAssets.length === 0) {
+                console.log(`No assets found for project '${project}'.`);
+                return;
+            }
+
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - days);
+
+            console.log(`Rotating assets for '${project}' older than ${days} days (Cutoff: ${cutoffDate.toISOString()})`);
+            if (dryRun) console.log('*** DRY RUN MODE - No files will be deleted ***');
+
+            let count = 0;
+            const updatedAssets = [];
+
+            for (const asset of projectAssets) {
+                const uploadDate = new Date(asset.uploaded_at);
+
+                if (asset.status === 'active' && uploadDate < cutoffDate) {
+                    console.log(`[Target] ${asset.filename} (Uploaded: ${asset.uploaded_at})`);
+
+                    if (!dryRun) {
+                        try {
+                            console.log(`Deleting from R2: ${asset.r2_key}...`);
+                            await deleteR2Object(asset.r2_key);
+                            asset.status = 'archived';
+                            asset.deleted_at = new Date().toISOString();
+                            count++;
+                        } catch (err) {
+                            console.error(`Failed to delete ${asset.filename}: ${err.message}`);
+                        }
+                    } else {
+                        count++;
+                    }
+                }
+                updatedAssets.push(asset);
+            }
+
+            if (!dryRun && count > 0) {
+                db.data.projects[project] = updatedAssets;
+                await db.write();
+                console.log(`\nSuccessfully rotated ${count} assets.`);
+            } else if (dryRun) {
+                console.log(`\nDry run finished. ${count} assets would be affected.`);
+            } else {
+                console.log('\nNo assets met the rotation criteria.');
+            }
 
         } catch (error) {
             console.error('Fatal Error:', error.message);

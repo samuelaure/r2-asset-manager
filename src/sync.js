@@ -50,3 +50,16 @@ export async function getR2ObjectMetadata(key) {
         throw error;
     }
 }
+/**
+ * Deletes an object from R2
+ * @param {string} key 
+ * @returns {Promise<void>}
+ */
+export async function deleteR2Object(key) {
+    const client = getS3Client();
+    const command = new DeleteObjectCommand({
+        Bucket: config.r2.bucket,
+        Key: key,
+    });
+    await client.send(command);
+}
