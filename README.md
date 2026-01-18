@@ -51,7 +51,9 @@ MAX_AUDIO_SIZE_MB=50
 ## ⌨️ Usage
 
 ### Sync Assets
+
 The Butler can be run with direct arguments or interactively.
+
 ```bash
 # Using arguments
 node butler.js sync --project astrologia_familiar --dir C:/videos/new_batch
@@ -64,7 +66,9 @@ node butler.js sync --skip-size-check
 ```
 
 ### Rotate Assets (Manual)
+
 Remove old assets from R2 for a specific project.
+
 ```bash
 # Delete assets older than 90 days
 node butler.js rotate --project astrologia_familiar --older-than 90
@@ -74,7 +78,9 @@ node butler.js rotate --project astrologia_familiar --older-than 30 --dry-run
 ```
 
 ## 📋 Manifest Structure
+
 The `manifest.json` automatically tracks your assets:
+
 ```json
 {
   "projects": {

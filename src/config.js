@@ -15,7 +15,7 @@ export const config = {
   limits: {
     videoMaxMB: parseInt(process.env.MAX_VIDEO_SIZE_MB || '500'),
     audioMaxMB: parseInt(process.env.MAX_AUDIO_SIZE_MB || '50'),
-  }
+  },
 };
 
 export function validateConfig() {
