@@ -174,7 +174,7 @@ program
         const currentCounter = isVideo ? projectConfig.videoCounter : projectConfig.audioCounter;
         const nextCounter = currentCounter + 1;
         const paddedCounter = String(nextCounter).padStart(4, '0');
-        const extension = pathModule.extname(fileName);
+        const extension = isVideo ? '.mp4' : '.m4a';
         const systemFileName = `${projectConfig.shortCode}_${typeCode}_${paddedCounter}${extension}`;
 
         // 4. Compress/Optimize
