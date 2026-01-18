@@ -4,9 +4,9 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import path from 'fs';
 import fsPromises from 'fs/promises';
-import { validateConfig } from './src/config.js';
+import { validateConfig, config } from './src/config.js';
 import { getManifest, addAsset, findAssetByHash, getProjectConfig, setProjectConfig } from './src/manifest.js';
-import { getFileHash } from './src/utils.js';
+import { getFileHash, formatSize } from './src/utils.js';
 import { compressVideo, compressAudio } from './src/ffmpeg.js';
 import { uploadToR2, deleteR2Object } from './src/sync.js';
 import pathModule from 'path';
@@ -20,18 +20,19 @@ const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg)$/i;
 program
     .name('butler')
     .description('R2 Media Butler - Process and Sync media assets')
-    .version('0.1.2');
+    .version('0.1.3');
 
 program
     .command('sync')
     .description('Process and upload local media (video/audio) to R2')
     .option('-p, --project <name>', 'Project/Namespace name')
     .option('-d, --dir <path>', 'Local directory with media')
+    .option('--skip-size-check', 'Skip large file size confirmation', false)
     .action(async (options) => {
         try {
             validateConfig();
 
-            let { project, dir } = options;
+            let { project, dir, skipSizeCheck } = options;
 
             // Interactive selection if not provided
             if (!project) {
@@ -110,11 +111,36 @@ program
 
             for (const fileName of mediaFiles) {
                 const filePath = pathModule.join(absoluteDir, fileName);
+                const fileStats = await fsPromises.stat(filePath);
                 const isVideo = VIDEO_EXTENSIONS.test(fileName);
                 const typeCode = isVideo ? 'VID' : 'AUD';
                 const folderName = isVideo ? 'videos' : 'audios';
 
-                console.log(`\n--- Processing [${typeCode}]: ${fileName} ---`);
+                console.log(`\n--- Evaluating [${typeCode}]: ${fileName} ---`);
+
+                // --- Size Filtering Logic ---
+                const sizeMB = fileStats.size / (1024 * 1024);
+                const limitMB = isVideo ? config.limits.videoMaxMB : config.limits.audioMaxMB;
+
+                if (!skipSizeCheck && sizeMB > limitMB) {
+                    console.warn(`⚠️  WARNING: File size exceeds typical limits!`);
+                    console.warn(`   File: ${fileName}`);
+                    console.warn(`   Size: ${formatSize(fileStats.size)} (Limit: ${limitMB} MB)`);
+
+                    const { confirm } = await inquirer.prompt([
+                        {
+                            type: 'confirm',
+                            name: 'confirm',
+                            message: `This file is unusually large. Do you still want to process and upload it?`,
+                            default: false
+                        }
+                    ]);
+
+                    if (!confirm) {
+                        console.log(`⏭️  Skipping: ${fileName}`);
+                        continue;
+                    }
+                }
 
                 // 1. Hash
                 console.log('Calculating hash...');
