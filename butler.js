@@ -167,6 +167,8 @@ program
           console.log(
             `Skipping: File already exists in project '${project}' as ${existing.system_filename} (Original: ${existing.original_filename})`
           );
+          console.log('Cleaning up local copy (already synced)...');
+          await fsPromises.unlink(filePath);
           continue;
         }
 
