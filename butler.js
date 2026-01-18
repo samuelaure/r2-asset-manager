@@ -7,23 +7,26 @@ import fsPromises from 'fs/promises';
 import { validateConfig } from './src/config.js';
 import { getManifest, addAsset, findAssetByHash, getProjectConfig, setProjectConfig } from './src/manifest.js';
 import { getFileHash } from './src/utils.js';
-import { compressVideo } from './src/ffmpeg.js';
+import { compressVideo, compressAudio } from './src/ffmpeg.js';
 import { uploadToR2, deleteR2Object } from './src/sync.js';
 import pathModule from 'path';
 import os from 'os';
 
 const program = new Command();
 
+const VIDEO_EXTENSIONS = /\.(mp4|mov|avi|mkv)$/i;
+const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg)$/i;
+
 program
     .name('butler')
-    .description('R2 Media Butler - Process and Sync video assets')
-    .version('0.1.1');
+    .description('R2 Media Butler - Process and Sync media assets')
+    .version('0.1.2');
 
 program
     .command('sync')
-    .description('Process and upload local videos to R2')
+    .description('Process and upload local media (video/audio) to R2')
     .option('-p, --project <name>', 'Project/Namespace name')
-    .option('-d, --dir <path>', 'Local directory with videos')
+    .option('-d, --dir <path>', 'Local directory with media')
     .action(async (options) => {
         try {
             validateConfig();
@@ -63,12 +66,11 @@ program
             if (!projectConfig) {
                 console.log(`\nNew project detected: ${project}`);
 
-                // Suggest 3 options for shortCode
                 const suggestions = [
                     project.substring(0, 2).toUpperCase(),
                     project.substring(0, 3).toUpperCase(),
                     project.split('_').map(word => word[0]).join('').toUpperCase().substring(0, 3)
-                ].filter((v, i, a) => a.indexOf(v) === i); // unique
+                ].filter((v, i, a) => a.indexOf(v) === i);
 
                 const setupAnswers = await inquirer.prompt([
                     {
@@ -90,25 +92,29 @@ program
                     ? setupAnswers.customShortCode
                     : setupAnswers.shortCodeOption;
 
-                await setProjectConfig(db, project, { shortCode, counter: 0 });
+                await setProjectConfig(db, project, { shortCode, videoCounter: 0, audioCounter: 0 });
                 projectConfig = await getProjectConfig(db, project);
                 console.log(`Project initialized with short-code: ${shortCode}\n`);
             }
 
             const absoluteDir = pathModule.resolve(dir);
             const files = await fsPromises.readdir(absoluteDir);
-            const videoFiles = files.filter(f => /\.(mp4|mov|avi|mkv)$/i.test(f));
+            const mediaFiles = files.filter(f => VIDEO_EXTENSIONS.test(f) || AUDIO_EXTENSIONS.test(f));
 
-            if (videoFiles.length === 0) {
-                console.log('No video files found in directory.');
+            if (mediaFiles.length === 0) {
+                console.log('No video or audio files found in directory.');
                 return;
             }
 
-            console.log(`Found ${videoFiles.length} videos. Starting Butler service for project: ${project}`);
+            console.log(`Found ${mediaFiles.length} media assets. Starting Butler service for project: ${project}`);
 
-            for (const fileName of videoFiles) {
+            for (const fileName of mediaFiles) {
                 const filePath = pathModule.join(absoluteDir, fileName);
-                console.log(`\n--- Processing: ${fileName} ---`);
+                const isVideo = VIDEO_EXTENSIONS.test(fileName);
+                const typeCode = isVideo ? 'VID' : 'AUD';
+                const folderName = isVideo ? 'videos' : 'audios';
+
+                console.log(`\n--- Processing [${typeCode}]: ${fileName} ---`);
 
                 // 1. Hash
                 console.log('Calculating hash...');
@@ -122,24 +128,30 @@ program
                 }
 
                 // 3. Increment Name Generation
-                const nextCounter = projectConfig.counter + 1;
+                const currentCounter = isVideo ? projectConfig.videoCounter : projectConfig.audioCounter;
+                const nextCounter = currentCounter + 1;
                 const paddedCounter = String(nextCounter).padStart(4, '0');
                 const extension = pathModule.extname(fileName);
-                const systemFileName = `${projectConfig.shortCode}_VID_${paddedCounter}${extension}`;
+                const systemFileName = `${projectConfig.shortCode}_${typeCode}_${paddedCounter}${extension}`;
 
-                // 4. Compress
+                // 4. Compress/Optimize
                 const tempPath = pathModule.join(os.tmpdir(), `butler_${hash}_${systemFileName}`);
-                console.log(`Compressing video to standardized name: ${systemFileName}...`);
-                await compressVideo(filePath, tempPath);
+                if (isVideo) {
+                    console.log(`Compressing video to: ${systemFileName}...`);
+                    await compressVideo(filePath, tempPath);
+                } else {
+                    console.log(`Optimizing audio to: ${systemFileName}...`);
+                    await compressAudio(filePath, tempPath);
+                }
 
                 // 5. Upload
-                const r2Key = `${project}/backgrounds/${systemFileName}`;
+                const r2Key = `${project}/${folderName}/${systemFileName}`;
                 console.log(`Uploading to R2: ${r2Key}...`);
-                const etag = await uploadToR2(tempPath, r2Key);
+                await uploadToR2(tempPath, r2Key);
 
                 // 6. Record in manifest
                 console.log('Recording in manifest...');
-                await addAsset(db, project, {
+                await addAsset(db, project, typeCode, {
                     system_filename: systemFileName,
                     original_filename: fileName,
                     hash: hash,
@@ -147,13 +159,13 @@ program
                     size: (await fsPromises.stat(tempPath)).size
                 });
 
-                // Update local config ref since addAsset increments it in DB
+                // Refresh config ref
                 projectConfig = await getProjectConfig(db, project);
 
                 // 7. Cleanup
                 console.log('Cleaning up local files...');
-                await fsPromises.unlink(tempPath); // remove temp
-                await fsPromises.unlink(filePath); // remove original (Verified Sync)
+                await fsPromises.unlink(tempPath);
+                await fsPromises.unlink(filePath);
 
                 console.log(`Finished: ${systemFileName}`);
             }
@@ -204,7 +216,7 @@ program
                 const uploadDate = new Date(asset.uploaded_at);
 
                 if (asset.status === 'active' && uploadDate < cutoffDate) {
-                    console.log(`[Target] ${asset.system_filename} (Original: ${asset.original_filename}, Uploaded: ${asset.uploaded_at})`);
+                    console.log(`[Target] [${asset.type}] ${asset.system_filename} (Original: ${asset.original_filename}, Uploaded: ${asset.uploaded_at})`);
 
                     if (!dryRun) {
                         try {

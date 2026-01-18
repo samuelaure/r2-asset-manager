@@ -15,21 +15,31 @@ export async function getProjectConfig(db, projectName) {
 export async function setProjectConfig(db, projectName, configData) {
     db.data.projectConfig[projectName] = {
         shortCode: configData.shortCode.toUpperCase(),
-        counter: configData.counter || 0
+        videoCounter: configData.videoCounter || 0,
+        audioCounter: configData.audioCounter || 0
     };
     await db.write();
 }
 
-export async function addAsset(db, projectName, assetData) {
+/**
+ * Adds an asset and increments the appropriate counter
+ * @param {object} db 
+ * @param {string} projectName 
+ * @param {string} type 'VID' or 'AUD'
+ * @param {object} assetData 
+ */
+export async function addAsset(db, projectName, type, assetData) {
     if (!db.data.projects[projectName]) {
         db.data.projects[projectName] = [];
     }
 
-    // Increment counter for the project
-    db.data.projectConfig[projectName].counter += 1;
-    const currentCounter = db.data.projectConfig[projectName].counter;
+    // Increment the specific counter
+    const counterKey = type === 'VID' ? 'videoCounter' : 'audioCounter';
+    db.data.projectConfig[projectName][counterKey] += 1;
+    const currentCounter = db.data.projectConfig[projectName][counterKey];
 
     const entry = {
+        type: type, // 'VID' or 'AUD'
         system_filename: assetData.system_filename,
         original_filename: assetData.original_filename,
         hash: assetData.hash,

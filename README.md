@@ -5,11 +5,12 @@ A sophisticated Node.js CLI utility designed to process, compress, and sync loca
 ## 🚀 Key Features
 
 - **Namespace Management**: Organize assets by project names (e.g., `astrologia_familiar`, `in999days`).
-- **Compression Engine**: Automatic FFmpeg-powered compression (H.264, CRF 24, AAC, max 1080p).
+- **Media Optimization Engine**: Automatic FFmpeg-powered compression for Videos (H.264, 1080p) and Audios (AAC).
+- **Standardized Naming**: Automatic generation of clean filenames (e.g., `AF_VID_0001.mp4`, `AF_AUD_0001.mp3`).
 - **Deduplication Protocol**: SHA-256 file hashing to prevent redundant processing and uploads.
-- **Verified Sync**: Local files are only cleaned up after a successful ETag verification against Cloudflare R2.
+- **Verified Sync**: Local files are only cleaned up after a successful upload verification to Cloudflare R2.
 - **Manual Rotation**: Folder-scoped rotation to archive or remove old assets from R2.
-- **Manifest Tracking**: Atomic JSON-based manifest to track `uploaded_at` timestamps and asset status.
+- **Manifest Tracking**: Atomic JSON-based manifest to track original filenames and upload history.
 
 ## 🛠️ Tech Stack
 
@@ -21,13 +22,13 @@ A sophisticated Node.js CLI utility designed to process, compress, and sync loca
 
 ## 📖 Operational Workflow
 
-1. **Scan**: Butler identifies new video files in a specified local directory.
-2. **Check**: Cross-references the SHA-256 hash with the local `manifest.json`.
-3. **Compress**: Processes the video using industry-standard H.264 settings (maintaining quality while optimizing size).
-4. **Upload**: Transfers the compressed asset to the specific project namespace in R2.
-5. **Verify**: Compares the R2 ETag with the local hash to ensure integrity.
+1. **Scan**: Butler identifies new media files (MP4, MP3, WAV, etc.) in a local directory.
+2. **Check**: Cross-references hashes with `manifest.json` to prevent duplicates.
+3. **Optimize**: Processes video (H.264) or audio (AAC) using industry-standard settings.
+4. **Name**: Assigns a standardized name using the project's short-code and an incremental counter (e.g., `AF_VID_0042.mp4`).
+5. **Upload**: Transfers the asset to the correct folder in R2 (`/videos/` or `/audios/`).
 6. **Clean**: Removes the original and temporary files from the local machine.
-7. **Record**: Updates the manifest with the new entry and timestamp.
+7. **Record**: Updates the manifest with the new entry, linking original and system filenames.
 
 ## ⚙️ Configuration
 

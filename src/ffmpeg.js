@@ -29,7 +29,7 @@ export function compressVideo(inputPath, outputPath) {
                 }
             ])
             .on('start', (commandLine) => {
-                console.log('Spawned Ffmpeg with command: ' + commandLine);
+                console.log('Spawned Ffmpeg (video) with command: ' + commandLine);
             })
             .on('error', (err) => {
                 console.error('An error occurred: ' + err.message);
@@ -44,7 +44,35 @@ export function compressVideo(inputPath, outputPath) {
 }
 
 /**
- * Probe video metadata
+ * Compresses an audio file to AAC, 128k.
+ * @param {string} inputPath 
+ * @param {string} outputPath 
+ * @returns {Promise<void>}
+ */
+export function compressAudio(inputPath, outputPath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+            .outputOptions([
+                '-c:a aac',
+                '-b:a 128k'
+            ])
+            .on('start', (commandLine) => {
+                console.log('Spawned Ffmpeg (audio) with command: ' + commandLine);
+            })
+            .on('error', (err) => {
+                console.error('An audio error occurred: ' + err.message);
+                reject(err);
+            })
+            .on('end', () => {
+                console.log('Audio processing finished !');
+                resolve();
+            })
+            .save(outputPath);
+    });
+}
+
+/**
+ * Probe video/audio metadata
  * @param {string} filePath 
  * @returns {Promise<ffmpeg.FfprobeData>}
  */

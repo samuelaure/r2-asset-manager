@@ -1,6 +1,6 @@
 {
     "name": "r2-media-butler",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "A sophisticated Node.js CLI utility for processing, compressing, and syncing video assets to Cloudflare R2.",
     "type": "module",
     "main": "butler.js",
