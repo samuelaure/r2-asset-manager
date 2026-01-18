@@ -22,11 +22,10 @@ export function compressVideo(inputPath, outputPath) {
                 '-b:a 128k',
                 '-pix_fmt yuv420p'
             ])
+            // Simplified and quoted scaling to avoid "Filter not found" errors
             .videoFilters([
-                {
-                    filter: 'scale',
-                    options: 'iw*min(1\,1920/iw):ih*min(1\,1080/ih)' // Scale down to 1080p if larger, else keep size
-                }
+                "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease",
+                "pad='ceil(iw/2)*2':'ceil(ih/2)*2'" // Ensures dimensions are even (required for libx264)
             ])
             .on('start', (commandLine) => {
                 console.log('Spawned Ffmpeg (video) with command: ' + commandLine);
